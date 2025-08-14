@@ -1,153 +1,122 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from glob import glob
-from PIL import Image as pil_image
-from matplotlib.pyplot import imshow, imsave
-from IPython.display import Image as Image
-
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from main_features import  preprocess
-
-import cv2
-import numpy as np
-from glob import glob
 import os
-from matplotlib import pyplot as plt
-from main_features import segmentation
-from main_features import texture
-
-from skimage.color import rgb2gray
-
-
-folder_list = os.listdir('dataset')
-
-outputVectors = []
-loadedImages = []
-
-input1=np.zeros([20, 1])
-target=[]
-tar=0
-for folder in folder_list:
-        
-        # create a path to the folder
-        path = 'dataset/' + str(folder)
-        img_files = os.listdir(path)
-        print(path)
-        for file in img_files:
-            src = os.path.join(path, file)
-            main_img = cv2.imread(src)
-            res=preprocess(main_img)
-            y=segmentation(res)
-            z=texture(y)
-            if len(z)==20:
-                input1= np.c_[input1,z]
-                target.append(tar)
-        tar=tar+1
-
-
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
-labelencoder = LabelEncoder()
-
-#---------------conversion of all categorial column values to vector/numerical--------#
-
-Label= labelencoder.fit_transform(target)
-
-
-
-X=np.transpose(input1[:,1:])
-
-#X=input1[:,1:]
-Y=target
-
-X_train,X_test,y_train,y_test = train_test_split(X,Y,test_size=0.2,random_state=12)
-from sklearn.tree import DecisionTreeClassifier
-clf_model = DecisionTreeClassifier(criterion="gini",random_state=12)
-clf_model.fit(X_train,y_train)
-y_predict = clf_model.predict(X_train)
-from sklearn.metrics import accuracy_score,classification_report,confusion_matrix
-accdt = accuracy_score(y_train,y_predict)*100
-print("accuracy of decision tree is=",accdt)
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import confusion_matrix,accuracy_score,precision_score,f1_score,recall_score
-test_targets=y_train
-cm = confusion_matrix(test_targets,y_predict)
-
-from sklearn.metrics import roc_curve
-##fpr ,tn, thresholds = roc_curve((test_targets),(y_predict))
-##Sensitivity= tn / (tn+fpr)
-##print('Sensitivity='+str(Sensitivity[1]))
-precision = precision_score((test_targets),(y_predict))
-
-print('precision='+str(precision))
-
-fpr ,tpr, thresholds = roc_curve((test_targets),(y_predict))
-f1score = f1_score((test_targets),(y_predict))
-
-print('f1-score='+str(f1score))
-
-fpr ,tpr, thresholds = roc_curve((test_targets),(y_predict))
-recallscore = recall_score((test_targets),(y_predict))
-
-print('recall-score='+str(recallscore))
-
-import pickle
-file = 'finalized_model_DT.sav'
-pickle.dump(clf_model, open(file, 'wb'))
-
 import numpy as np
-import pandas as pd
+import pickle
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from tensorflow import keras
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import load_model
+from skimage.feature.texture import graycomatrix, graycoprops  # ✅ Updated import
+from skimage.io import imread
+from skimage.color import rgb2gray
+from skimage.transform import resize
+import glob
 
+# -----------------------------
+# 1. Dataset Loading & Feature Extraction
+# -----------------------------
+DATASET_DIR = "dataset"  # Folder structure: dataset/class_name/*.jpg
+IMG_SIZE = (64, 64)       # Resize for consistency
 
-X=np.transpose(input1[:,1:])
+def extract_features(image_path):
+    """Extract GLCM features from an image."""
+    img = imread(image_path)
+    img_gray = rgb2gray(img)
+    img_resized = resize(img_gray, IMG_SIZE, anti_aliasing=True)
+    img_rescaled = (img_resized * 255).astype(np.uint8)
+    
+    glcm = graycomatrix(img_rescaled, [1], [0], symmetric=True, normed=True)
+    contrast = graycoprops(glcm, 'contrast')[0, 0]
+    dissimilarity = graycoprops(glcm, 'dissimilarity')[0, 0]
+    homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
+    energy = graycoprops(glcm, 'energy')[0, 0]
+    correlation = graycoprops(glcm, 'correlation')[0, 0]
+    
+    return [contrast, dissimilarity, homogeneity, energy, correlation]
 
-#X=input1[:,1:]
-Y=target
+features = []
+labels = []
+class_names = os.listdir(DATASET_DIR)
 
-### Define the model
-model = Sequential()
-model.add(Dense(10, input_dim=X_train.shape[1], activation="relu"))
-model.add(Dense(10, activation="sigmoid"))
+for label_index, class_name in enumerate(class_names):
+    img_files = glob.glob(os.path.join(DATASET_DIR, class_name, "*.jpg"))
+    for img_path in img_files:
+        try:
+            feat = extract_features(img_path)
+            features.append(feat)
+            labels.append(label_index)
+        except Exception as e:
+            print(f"Error processing {img_path}: {e}")
 
-# Compile the model
-model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
+X = np.array(features)
+y = np.array(labels)
 
+# -----------------------------
+# 2. Train-Test Split
+# -----------------------------
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
+# -----------------------------
+# 3. Model Training Functions
+# -----------------------------
+def evaluate_model(name, model, X_train, y_train, X_test, y_test, save_path):
+    """Train, evaluate, and save a model."""
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+    rec = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+    f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
+    
+    print(f"\n{name} Results:")
+    print(f"Accuracy: {acc:.4f}")
+    print(f"Precision: {prec:.4f}")
+    print(f"Recall: {rec:.4f}")
+    print(f"F1 Score: {f1:.4f}")
+    
+    pickle.dump(model, open(save_path, "wb"))
+    print(f"Saved {name} model to {save_path}")
 
-import numpy as np
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
-# Generate some sample data
-y_true = np.array([1, 0, 1, 1, 0, 0, 1, 0, 0, 1])
-y_pred = np.array([1, 1, 1, 0, 0, 0, 1, 0, 0, 0])
-# Calculate precision
-accuracy = accuracy_score(y_true, y_pred)*100
-print("CNN accuracy is:", accuracy)
-precision = precision_score(y_true, y_pred)
-print("Precision:", precision)
-# Calculate recall
-recall = recall_score(y_true, y_pred)
-print("Recall:", recall)
-# Calculate F1 score
-f1 = f1_score(y_true, y_pred)
-print("F1 score:", f1)
-### Calculate sensitivity (True Positive Rate)
-##tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-##sensitivity = tp / (tp + fn)
-##print("Sensitivity:", sensitivity)
+# -----------------------------
+# 4. Decision Tree
+# -----------------------------
+dt_model = DecisionTreeClassifier(random_state=42)
+evaluate_model("Decision Tree", dt_model, X_train, y_train, X_test, y_test, "finalized_model_DT.sav")
 
+# -----------------------------
+# 5. Random Forest
+# -----------------------------
+rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+evaluate_model("Random Forest", rf_model, X_train, y_train, X_test, y_test, "finalized_model_RF.sav")
 
+# -----------------------------
+# 6. Support Vector Machine
+# -----------------------------
+svm_model = SVC(kernel='linear', probability=True, random_state=42)
+evaluate_model("Support Vector Machine", svm_model, X_train, y_train, X_test, y_test, "finalized_model_SVM.sav")
 
-import matplotlib.pyplot as plt
-x=['Decision Tree', 'CNN']
-y=[accdt, accuracy]
-plt.bar(x,y, color=('green','blue'))
-plt.xlabel('Algorithm')
-plt.ylabel("Accuracy")
-plt.title('Accuracy bar plot')
-plt.show()
+# -----------------------------
+# 7. CNN/MLP for Tabular Data
+# -----------------------------
+y_train_cnn = to_categorical(y_train)
+y_test_cnn = to_categorical(y_test)
+
+cnn_model = Sequential()
+cnn_model.add(Dense(64, input_dim=X_train.shape[1], activation="relu"))
+cnn_model.add(Dense(32, activation="relu"))
+cnn_model.add(Dense(len(class_names), activation="softmax"))
+
+cnn_model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=["accuracy"])
+cnn_model.fit(X_train, y_train_cnn, epochs=50, batch_size=8, verbose=1)
+
+loss, acc = cnn_model.evaluate(X_test, y_test_cnn, verbose=0)
+print(f"\nCNN Accuracy: {acc:.4f}")
+
+keras.saving.save_model(cnn_model, "finalized_model_CNN.keras")
+# cnn_model.save("finalized_model_CNN.h5")
+print("Saved CNN model to finalized_model_CNN.keras")
