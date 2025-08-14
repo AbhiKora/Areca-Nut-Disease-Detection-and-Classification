@@ -6,7 +6,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
-from tensorflow import keras
+# from tensorflow import keras
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.utils import to_categorical
@@ -117,6 +117,6 @@ cnn_model.fit(X_train, y_train_cnn, epochs=50, batch_size=8, verbose=1)
 loss, acc = cnn_model.evaluate(X_test, y_test_cnn, verbose=0)
 print(f"\nCNN Accuracy: {acc:.4f}")
 
-keras.saving.save_model(cnn_model, "finalized_model_CNN.keras")
-# cnn_model.save("finalized_model_CNN.h5")
+# keras.saving.save_model(cnn_model, "finalized_model_CNN.keras")
+cnn_model.save("finalized_model_CNN.keras")
 print("Saved CNN model to finalized_model_CNN.keras")
