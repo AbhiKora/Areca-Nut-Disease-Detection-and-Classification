@@ -1,30 +1,30 @@
 import os
 import numpy as np
 import pickle
+import glob
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
-# from tensorflow import keras
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.models import load_model
-from skimage.feature.texture import graycomatrix, graycoprops  # ✅ Updated import
+from tensorflow.keras import layers, models
+from skimage.feature.texture import graycomatrix, graycoprops
 from skimage.io import imread
 from skimage.color import rgb2gray
 from skimage.transform import resize
-import glob
 
 # -----------------------------
 # 1. Dataset Loading & Feature Extraction
 # -----------------------------
-DATASET_DIR = "dataset"  # Folder structure: dataset/class_name/*.jpg
-IMG_SIZE = (64, 64)       # Resize for consistency
+DATASET_DIR = "dataset"
+IMG_SIZE = (64, 64)
+
+classes = ['diseased', 'normal']
 
 def extract_features(image_path):
-    """Extract GLCM features from an image."""
     img = imread(image_path)
     img_gray = rgb2gray(img)
     img_resized = resize(img_gray, IMG_SIZE, anti_aliasing=True)
@@ -39,8 +39,7 @@ def extract_features(image_path):
     
     return [contrast, dissimilarity, homogeneity, energy, correlation]
 
-features = []
-labels = []
+features, labels = [], []
 class_names = os.listdir(DATASET_DIR)
 
 for label_index, class_name in enumerate(class_names):
@@ -59,64 +58,124 @@ y = np.array(labels)
 # -----------------------------
 # 2. Train-Test Split
 # -----------------------------
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
 
 # -----------------------------
-# 3. Model Training Functions
+# 3. Model Training & Evaluation
 # -----------------------------
 def evaluate_model(name, model, X_train, y_train, X_test, y_test, save_path):
-    """Train, evaluate, and save a model."""
+    """Train, evaluate, save model, and return metrics + confidences."""
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    prec = precision_score(y_test, y_pred, average='weighted', zero_division=0)
-    rec = recall_score(y_test, y_pred, average='weighted', zero_division=0)
-    f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
-    
-    print(f"\n{name} Results:")
-    print(f"Accuracy: {acc:.4f}")
-    print(f"Precision: {prec:.4f}")
-    print(f"Recall: {rec:.4f}")
-    print(f"F1 Score: {f1:.4f}")
-    
+
+    if hasattr(model, "predict_proba"):
+        confidences = model.predict_proba(X_test)
+    else:
+        # For models without predict_proba (like SVC without probability=True)
+        confidences = np.zeros((len(y_pred), len(class_names)))
+
+    metrics = {
+        "accuracy": accuracy_score(y_test, y_pred),
+        "precision": precision_score(y_test, y_pred, average='weighted', zero_division=0),
+        "recall": recall_score(y_test, y_pred, average='weighted', zero_division=0),
+        "f1": f1_score(y_test, y_pred, average='weighted', zero_division=0)
+    }
+
     pickle.dump(model, open(save_path, "wb"))
-    print(f"Saved {name} model to {save_path}")
+    return metrics, confidences
 
 # -----------------------------
-# 4. Decision Tree
+# Train Traditional Models
 # -----------------------------
-dt_model = DecisionTreeClassifier(random_state=42)
-evaluate_model("Decision Tree", dt_model, X_train, y_train, X_test, y_test, "finalized_model_DT.sav")
+results = {}
+confidences_dict = {}
+
+# Decision Tree
+metrics_dt, conf_dt = evaluate_model(
+    "Decision Tree",
+    DecisionTreeClassifier(random_state=42),
+    X_train, y_train, X_test, y_test,
+    "finalized_model_DT.sav"
+)
+results["Decision Tree"] = metrics_dt
+confidences_dict["Decision Tree"] = conf_dt
+
+# Build CNN Model
+cnn_model = models.Sequential([
+    layers.Conv2D(32, (3, 3), activation='relu', input_shape=(IMG_SIZE, IMG_SIZE, 3)),
+    layers.MaxPooling2D((2, 2)),
+    
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    
+    layers.Flatten(),
+    layers.Dense(64, activation='relu'),
+    layers.Dense(len(classes), activation='softmax')
+])
+
+cnn_model.compile(optimizer='adam',
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
+
+# Train CNN
+cnn_model.fit(X_train, y_train, epochs=10, batch_size=32, validation_data=(X_test, y_test))
+cnn_model.save("finalized_model_CNN.keras")
+
+# Random Forest
+metrics_rf, conf_rf = evaluate_model(
+    "Random Forest",
+    RandomForestClassifier(n_estimators=100, random_state=42),
+    X_train, y_train, X_test, y_test,
+    "finalized_model_RF.sav"
+)
+results["Random Forest"] = metrics_rf
+confidences_dict["Random Forest"] = conf_rf
+
+# Support Vector Machine
+metrics_svm, conf_svm = evaluate_model(
+    "Support Vector Machine",
+    SVC(kernel='linear', probability=True, random_state=42),
+    X_train, y_train, X_test, y_test,
+    "finalized_model_SVM.sav"
+)
+results["Support Vector Machine"] = metrics_svm
+confidences_dict["Support Vector Machine"] = conf_svm
 
 # -----------------------------
-# 5. Random Forest
-# -----------------------------
-rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
-evaluate_model("Random Forest", rf_model, X_train, y_train, X_test, y_test, "finalized_model_RF.sav")
-
-# -----------------------------
-# 6. Support Vector Machine
-# -----------------------------
-svm_model = SVC(kernel='linear', probability=True, random_state=42)
-evaluate_model("Support Vector Machine", svm_model, X_train, y_train, X_test, y_test, "finalized_model_SVM.sav")
-
-# -----------------------------
-# 7. CNN/MLP for Tabular Data
+# 4. MLP (Tabular-based)
 # -----------------------------
 y_train_cnn = to_categorical(y_train)
 y_test_cnn = to_categorical(y_test)
 
-cnn_model = Sequential()
-cnn_model.add(Dense(64, input_dim=X_train.shape[1], activation="relu"))
-cnn_model.add(Dense(32, activation="relu"))
-cnn_model.add(Dense(len(class_names), activation="softmax"))
+mlp_model = Sequential()
+mlp_model.add(Dense(64, input_dim=X_train.shape[1], activation="relu"))
+mlp_model.add(Dense(32, activation="relu"))
+mlp_model.add(Dense(len(class_names), activation="softmax"))
 
-cnn_model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=["accuracy"])
-cnn_model.fit(X_train, y_train_cnn, epochs=50, batch_size=8, verbose=1)
+mlp_model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=["accuracy"])
+mlp_model.fit(X_train, y_train_cnn, epochs=50, batch_size=8, verbose=0)
 
-loss, acc = cnn_model.evaluate(X_test, y_test_cnn, verbose=0)
-print(f"\nCNN Accuracy: {acc:.4f}")
+loss, acc = mlp_model.evaluate(X_test, y_test_cnn, verbose=0)
+y_pred_mlp = np.argmax(mlp_model.predict(X_test), axis=1)
+conf_mlp = mlp_model.predict(X_test)
 
-# keras.saving.save_model(cnn_model, "finalized_model_CNN.keras")
-cnn_model.save("finalized_model_CNN.keras")
-print("Saved CNN model to finalized_model_CNN.keras")
+results["MLP"] = {
+    "accuracy": acc,
+    "precision": precision_score(y_test, y_pred_mlp, average='weighted', zero_division=0),
+    "recall": recall_score(y_test, y_pred_mlp, average='weighted', zero_division=0),
+    "f1": f1_score(y_test, y_pred_mlp, average='weighted', zero_division=0)
+}
+confidences_dict["MLP"] = conf_mlp
+
+mlp_model.save("finalized_model_MLP.keras")
+
+# -----------------------------
+# Save results for Streamlit
+# -----------------------------
+np.save("model_results.npy", results)
+np.save("model_confidences.npy", confidences_dict)
+np.save("class_names.npy", class_names)
+
+print("✅ Training complete. Metrics and confidences saved.")
