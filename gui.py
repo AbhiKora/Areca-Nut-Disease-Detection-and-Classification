@@ -1,138 +1,99 @@
 import streamlit as st
 import numpy as np
-import pickle
-import cv2
-import os
 import tensorflow as tf
+import pickle
+import joblib
 import matplotlib.pyplot as plt
-from skimage.feature import graycomatrix, graycoprops
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import classification_report
+from tensorflow.keras.preprocessing import image
 
-# -------------------
-# Load models
-# -------------------
-def load_model(path):
-    ext = os.path.splitext(path)[1].lower()
-    if ext in [".h5", ".keras"]:
-        return tf.keras.models.load_model(path), "keras"
-    elif ext == ".sav":
-        return pickle.load(open(path, "rb")), "pickle"
-    else:
-        st.error(f"Unsupported model format: {ext}")
-        st.stop()
+# -----------------------
+# CONFIG
+# -----------------------
+IMG_SIZE = (128, 128)  # must match training size
+CLASS_NAMES = ["Healthy", "Diseased"]  # update with your dataset classes
 
+# Paths to saved models
 MODEL_PATHS = {
-    "CNN": "finalized_model_CNN.keras",
-    "RandomForest": "finalized_model_RF.sav",
-    "SVM": "finalized_model_SVM.sav"
+    "CNN": "CNN.keras",
+    "MobileNetV2": "MobileNetV2.keras",
+    "EfficientNetB0": "EfficientNetB0.keras",
+    "ResNet50": "ResNet50.keras",
+    # "SVM": "svm_model.sav",
+    # "Random Forest": "rf_model.sav",
+    # "Decision Tree": "dt_model.sav"
 }
 
-models = {}
-for name, path in MODEL_PATHS.items():
-    if os.path.exists(path):
-        models[name] = load_model(path)
-    else:
-        st.warning(f"⚠ Model file not found: {path}")
+# -----------------------
+# HELPER FUNCTIONS
+# -----------------------
+@st.cache_resource
+def load_keras_model(path):
+    return tf.keras.models.load_model(path)
 
-CLASSES = ['diseased', 'normal']
+@st.cache_resource
+def load_sklearn_model(path):
+    return joblib.load(path)
 
-# -------------------
-# Image processing
-# -------------------
-def preprocess_image(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    return gray
+def preprocess_image(uploaded_file):
+    img = image.load_img(uploaded_file, target_size=IMG_SIZE)
+    img_array = image.img_to_array(img) / 255.0
+    img_array = np.expand_dims(img_array, axis=0)
+    return img, img_array
 
-def segment_image(image):
-    gray = preprocess_image(image)
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return thresh
+def predict_with_keras(model, img_array):
+    preds = model.predict(img_array)
+    if preds.shape[1] == 1:  # binary classification
+        prob = preds[0][0]
+        return {CLASS_NAMES[0]: 1-prob, CLASS_NAMES[1]: prob}
+    else:  # multi-class
+        return {CLASS_NAMES[i]: preds[0][i] for i in range(len(CLASS_NAMES))}
 
-def extract_features(image):
-    glcm = graycomatrix(image, [1], [0], levels=256, symmetric=True, normed=True)
-    features = [
-        graycoprops(glcm, 'contrast')[0, 0],
-        graycoprops(glcm, 'dissimilarity')[0, 0],
-        graycoprops(glcm, 'homogeneity')[0, 0],
-        graycoprops(glcm, 'energy')[0, 0],
-        graycoprops(glcm, 'correlation')[0, 0],
-    ]
-    return np.array(features, dtype=np.float32)
+def predict_with_sklearn(model, img_array):
+    # Flatten image for sklearn models
+    flat = img_array.reshape(1, -1)
+    prob = model.predict_proba(flat)[0]
+    return {CLASS_NAMES[i]: prob[i] for i in range(len(CLASS_NAMES))}
 
-# -------------------
-# Classification & Metrics
-# -------------------
-def classify_and_get_confidences(features):
-    results = {}
-    confidences = {}
-    features = features.reshape(1, -1)
+# -----------------------
+# STREAMLIT APP
+# -----------------------
+st.title("🌴 Areca Nut X-Ray Classifier")
+st.write("Upload an X-ray image and compare predictions from different models.")
 
-    for name, (model, model_type) in models.items():
-        if model_type == "keras":
-            pred_proba = model.predict(features, verbose=0)
-            if pred_proba.ndim > 1:
-                confidence = float(np.max(pred_proba))
-                pred_class = np.argmax(pred_proba, axis=1)[0]
-            else:
-                confidence = float(pred_proba[0])
-                pred_class = int(confidence > 0.5)
-        else:
-            if hasattr(model, "predict_proba"):
-                proba = model.predict_proba(features)
-                confidence = float(np.max(proba))
-            else:
-                proba = None
-                confidence = 1.0  # Assume full confidence if not available
-            pred_class = int(model.predict(features)[0])
-
-        results[name] = CLASSES[pred_class]
-        confidences[name] = confidence
-
-    return results, confidences
-
-# -------------------
-# Streamlit UI
-# -------------------
-st.set_page_config(page_title="🌰 Arecanut Classifier", layout="centered")
-st.title("🌰 Arecanut Multi-Model Classification with Metrics")
-st.write("Upload an image to classify it with multiple models and see performance metrics.")
-
-uploaded_file = st.file_uploader("📂 Upload Arecanut Image", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
-    file_bytes = np.frombuffer(uploaded_file.read(), np.uint8)
-    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    # Preprocess
+    img, img_array = preprocess_image(uploaded_file)
+    st.image(img, caption="Uploaded Image", use_column_width=True)
 
-    st.subheader("📷 Original Image")
-    st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), channels="RGB")
+    # Run predictions
+    st.subheader("🔮 Predictions")
+    confidences = {}
+    for model_name, path in MODEL_PATHS.items():
+        try:
+            if path.endswith(".keras"):
+                model = load_keras_model(path)
+                preds = predict_with_keras(model, img_array)
+            else:  # sklearn models
+                model = load_sklearn_model(path)
+                preds = predict_with_sklearn(model, img_array)
 
-    segmented = segment_image(image)
-    st.subheader("🔍 Segmented Image")
-    st.image(segmented, channels="GRAY")
+            confidences[model_name] = preds
+            pred_class = max(preds, key=preds.get)
+            st.write(f"**{model_name}** → {pred_class} ({max(preds.values()):.2f})")
+        except Exception as e:
+            st.warning(f"{model_name} failed: {e}")
 
-    features = extract_features(preprocess_image(image))
-    st.write("🧮 **Extracted Features:**", features)
-
-    if st.button("🚀 Classify and Show Metrics"):
-        results, confidences = classify_and_get_confidences(features)
-
-        st.subheader("📊 Predictions & Confidence")
-        for model_name in results:
-            st.write(f"**{model_name}** → {results[model_name]} ({confidences[model_name]*100:.2f}% confidence)")
-
-        # Plot confidence comparison
-        st.subheader("📈 Model Confidence Comparison")
-        fig, ax = plt.subplots()
-        ax.bar(confidences.keys(), confidences.values(), color='skyblue')
-        ax.set_ylabel("Confidence")
-        ax.set_ylim([0, 1])
+    # Plot comparison
+    if confidences:
+        st.subheader("📊 Confidence Comparison")
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for model_name, preds in confidences.items():
+            ax.bar([f"{model_name}-{c}" for c in preds.keys()],
+                   list(preds.values()), label=model_name)
+        plt.xticks(rotation=45, ha="right")
+        plt.ylabel("Confidence")
+        plt.title("Model Predictions Comparison")
         st.pyplot(fig)
-
-        # Placeholder: Load saved metrics from training
-        st.subheader("📋 Model Evaluation Metrics (from training)")
-        metrics_data = {
-            "CNN": {"Accuracy": 0.92, "Precision": 0.91, "Recall": 0.90, "F1-Score": 0.905},
-            "RandomForest": {"Accuracy": 0.88, "Precision": 0.87, "Recall": 0.86, "F1-Score": 0.865},
-            "SVM": {"Accuracy": 0.85, "Precision": 0.84, "Recall": 0.83, "F1-Score": 0.835}
-        }
-        st.table(metrics_data)
