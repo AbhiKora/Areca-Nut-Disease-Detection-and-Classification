@@ -6,7 +6,6 @@ import os
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from skimage.feature import graycomatrix, graycoprops
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 # -------------------
 # Load models
@@ -24,7 +23,9 @@ def load_model(path):
 MODEL_PATHS = {
     "CNN": "finalized_model_CNN.keras",
     "RandomForest": "finalized_model_RF.sav",
-    "SVM": "finalized_model_SVM.sav"
+    "SVM": "finalized_model_SVM.sav",
+    "MLP": "finalized_model_MLP.keras",
+    "DecisionTree": "finalized_model_DT.sav"
 }
 
 models = {}
@@ -34,7 +35,7 @@ for name, path in MODEL_PATHS.items():
     else:
         st.warning(f"⚠ Model file not found: {path}")
 
-CLASSES = ['diseased', 'normal']
+CLASSES = ['diseased', 'mild', 'normal']
 
 # -------------------
 # Image processing
@@ -95,7 +96,7 @@ def classify_and_get_confidences(features):
 # -------------------
 st.set_page_config(page_title="🌰 Arecanut Classifier", layout="centered")
 st.title("🌰 Arecanut Multi-Model Classification with Metrics")
-st.write("Upload an image to classify it with multiple models and see performance metrics.")
+st.write("Upload an image to classify it with multiple models (CNN, RF, SVM, MLP, DT).")
 
 uploaded_file = st.file_uploader("📂 Upload Arecanut Image", type=["jpg", "jpeg", "png"])
 
@@ -127,12 +128,3 @@ if uploaded_file:
         ax.set_ylabel("Confidence")
         ax.set_ylim([0, 1])
         st.pyplot(fig)
-
-        # Placeholder: Load saved metrics from training
-        st.subheader("📋 Model Evaluation Metrics (from training)")
-        metrics_data = {
-            "CNN": {"Accuracy": 0.92, "Precision": 0.91, "Recall": 0.90, "F1-Score": 0.905},
-            "RandomForest": {"Accuracy": 0.88, "Precision": 0.87, "Recall": 0.86, "F1-Score": 0.865},
-            "SVM": {"Accuracy": 0.85, "Precision": 0.84, "Recall": 0.83, "F1-Score": 0.835}
-        }
-        st.table(metrics_data)
