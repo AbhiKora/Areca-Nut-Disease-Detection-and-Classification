@@ -1,31 +1,21 @@
 import streamlit as st
 import numpy as np
-import pickle
-import cv2
 import os
+import cv2
 import tensorflow as tf
 import matplotlib.pyplot as plt
-from skimage.feature import graycomatrix, graycoprops
 
 # -------------------
 # Load models
 # -------------------
 def load_model(path):
-    ext = os.path.splitext(path)[1].lower()
-    if ext in [".h5", ".keras"]:
-        return tf.keras.models.load_model(path), "keras"
-    elif ext == ".sav":
-        return pickle.load(open(path, "rb")), "pickle"
-    else:
-        st.error(f"Unsupported model format: {ext}")
-        st.stop()
+    return tf.keras.models.load_model(path)
 
 MODEL_PATHS = {
-    "CNN": "finalized_model_CNN.keras",
-    "RandomForest": "finalized_model_RF.sav",
-    "SVM": "finalized_model_SVM.sav",
-    "MLP": "finalized_model_MLP.keras",
-    "DecisionTree": "finalized_model_DT.sav"
+    "CNN": "CNN_model.keras",
+    "ResNet": "ResNet_model.keras",
+    "EfficientNet": "EfficientNet_model.keras",
+    "MobileNet": "MobileNet_model.keras",
 }
 
 models = {}
@@ -35,56 +25,34 @@ for name, path in MODEL_PATHS.items():
     else:
         st.warning(f"⚠ Model file not found: {path}")
 
-CLASSES = ['diseased', 'mild', 'normal']
+CLASSES = ["Diseased", "Normal"]
 
 # -------------------
-# Image processing
+# Image preprocessing
 # -------------------
 def preprocess_image(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    return gray
-
-def segment_image(image):
-    gray = preprocess_image(image)
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return thresh
-
-def extract_features(image):
-    glcm = graycomatrix(image, [1], [0], levels=256, symmetric=True, normed=True)
-    features = [
-        graycoprops(glcm, 'contrast')[0, 0],
-        graycoprops(glcm, 'dissimilarity')[0, 0],
-        graycoprops(glcm, 'homogeneity')[0, 0],
-        graycoprops(glcm, 'energy')[0, 0],
-        graycoprops(glcm, 'correlation')[0, 0],
-    ]
-    return np.array(features, dtype=np.float32)
+    img_resized = cv2.resize(image, (224, 224))  # Resize for CNN/ResNet/EfficientNet/MobileNet
+    img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)  # Ensure 3 channels
+    img_norm = img_rgb.astype("float32") / 255.0
+    return np.expand_dims(img_norm, axis=0)
 
 # -------------------
-# Classification & Metrics
+# Classification
 # -------------------
-def classify_and_get_confidences(features):
+def classify_image(image):
     results = {}
     confidences = {}
-    features = features.reshape(1, -1)
 
-    for name, (model, model_type) in models.items():
-        if model_type == "keras":
-            pred_proba = model.predict(features, verbose=0)
-            if pred_proba.ndim > 1:
-                confidence = float(np.max(pred_proba))
-                pred_class = np.argmax(pred_proba, axis=1)[0]
-            else:
-                confidence = float(pred_proba[0])
-                pred_class = int(confidence > 0.5)
-        else:
-            if hasattr(model, "predict_proba"):
-                proba = model.predict_proba(features)
-                confidence = float(np.max(proba))
-            else:
-                proba = None
-                confidence = 1.0  # Assume full confidence if not available
-            pred_class = int(model.predict(features)[0])
+    for name, model in models.items():
+        preds = model.predict(image, verbose=0)
+
+        if preds.shape[1] == 1:  # Binary (sigmoid)
+            confidence = float(preds[0][0])
+            pred_class = int(confidence > 0.5)
+            confidence = confidence if pred_class == 1 else 1 - confidence
+        else:  # Softmax (2 classes)
+            pred_class = np.argmax(preds, axis=1)[0]
+            confidence = float(np.max(preds))
 
         results[name] = CLASSES[pred_class]
         confidences[name] = confidence
@@ -95,8 +63,8 @@ def classify_and_get_confidences(features):
 # Streamlit UI
 # -------------------
 st.set_page_config(page_title="🌰 Arecanut Classifier", layout="centered")
-st.title("🌰 Arecanut Multi-Model Classification with Metrics")
-st.write("Upload an image to classify it with multiple models (CNN, RF, SVM, MLP, DT).")
+st.title("🌰 Arecanut Deep Learning Classifier")
+st.write("Upload an image to classify it using CNN, ResNet, EfficientNet, and MobileNet.")
 
 uploaded_file = st.file_uploader("📂 Upload Arecanut Image", type=["jpg", "jpeg", "png"])
 
@@ -107,15 +75,10 @@ if uploaded_file:
     st.subheader("📷 Original Image")
     st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), channels="RGB")
 
-    segmented = segment_image(image)
-    st.subheader("🔍 Segmented Image")
-    st.image(segmented, channels="GRAY")
+    input_tensor = preprocess_image(image)
 
-    features = extract_features(preprocess_image(image))
-    st.write("🧮 **Extracted Features:**", features)
-
-    if st.button("🚀 Classify and Show Metrics"):
-        results, confidences = classify_and_get_confidences(features)
+    if st.button("🚀 Classify"):
+        results, confidences = classify_image(input_tensor)
 
         st.subheader("📊 Predictions & Confidence")
         for model_name in results:
@@ -124,7 +87,7 @@ if uploaded_file:
         # Plot confidence comparison
         st.subheader("📈 Model Confidence Comparison")
         fig, ax = plt.subplots()
-        ax.bar(confidences.keys(), confidences.values(), color='skyblue')
+        ax.bar(confidences.keys(), confidences.values(), color="skyblue")
         ax.set_ylabel("Confidence")
         ax.set_ylim([0, 1])
         st.pyplot(fig)

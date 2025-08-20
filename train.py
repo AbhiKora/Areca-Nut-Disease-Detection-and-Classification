@@ -1,185 +1,216 @@
 import os
 import numpy as np
-import pickle
 import glob
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.utils import to_categorical
+
+import tensorflow as tf
 from tensorflow.keras import layers, models
-from skimage.feature.texture import graycomatrix, graycoprops
-from skimage.io import imread
-from skimage.color import rgb2gray
-from skimage.transform import resize
+from tensorflow.keras.applications import ResNet50, EfficientNetB0, MobileNetV2
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.utils import to_categorical
+from tqdm import tqdm
 
 # -----------------------------
-# 1. Dataset Loading & Feature Extraction
+# 1. Dataset Loading
 # -----------------------------
 DATASET_DIR = "dataset"
-IMG_SIZE = (64, 64)
+IMG_SIZE = (224, 224)   # Standard size for pretrained models
+BATCH_SIZE = 32
+EPOCHS = 10
 
-# Define classes explicitly
 classes = ['diseased', 'mild', 'normal']
 
-def extract_features(image_path):
-    img = imread(image_path)
-    img_gray = rgb2gray(img)
-    img_resized = resize(img_gray, IMG_SIZE, anti_aliasing=True)
-    img_rescaled = (img_resized * 255).astype(np.uint8)
-    
-    glcm = graycomatrix(img_rescaled, [1], [0], symmetric=True, normed=True)
-    contrast = graycoprops(glcm, 'contrast')[0, 0]
-    dissimilarity = graycoprops(glcm, 'dissimilarity')[0, 0]
-    homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
-    energy = graycoprops(glcm, 'energy')[0, 0]
-    correlation = graycoprops(glcm, 'correlation')[0, 0]
-    
-    return [contrast, dissimilarity, homogeneity, energy, correlation]
+def load_dataset(dataset_dir, img_size, classes):
+    X, y = [], []
+    print("🔍 Loading dataset...")
 
-features, labels = [], []
+    for label_index, class_name in enumerate(classes):
+        img_files = glob.glob(os.path.join(dataset_dir, class_name, "*.jpg"))
+        for img_path in tqdm(img_files, desc=f"Processing {class_name}"):
+            try:
+                # force RGB to avoid 1-channel error
+                img = load_img(img_path, target_size=img_size, color_mode="rgb")
+                img_array = img_to_array(img) / 255.0
+                X.append(img_array)
+                y.append(label_index)
+            except Exception as e:
+                print(f"⚠️ Error processing {img_path}: {e}")
+    return np.array(X), np.array(y)
 
-# loop through classes in fixed order
-for label_index, class_name in enumerate(classes):
-    img_files = glob.glob(os.path.join(DATASET_DIR, class_name, "*.jpg"))
-    for img_path in img_files:
-        try:
-            feat = extract_features(img_path)
-            features.append(feat)
-            labels.append(label_index)
-        except Exception as e:
-            print(f"Error processing {img_path}: {e}")
+X, y = load_dataset(DATASET_DIR, IMG_SIZE, classes)
 
-X = np.array(features)
-y = np.array(labels)
-
-# -----------------------------
-# 2. Train-Test Split
-# -----------------------------
+# Train-Test Split
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
-# -----------------------------
-# 3. Model Training & Evaluation
-# -----------------------------
-def evaluate_model(name, model, X_train, y_train, X_test, y_test, save_path):
-    """Train, evaluate, save model, and return metrics + confidences."""
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
+y_train_cat = to_categorical(y_train, num_classes=len(classes))
+y_test_cat = to_categorical(y_test, num_classes=len(classes))
 
-    if hasattr(model, "predict_proba"):
-        confidences = model.predict_proba(X_test)
-    else:
-        confidences = np.zeros((len(y_pred), len(classes)))
+# -----------------------------
+# 2. Model Builder Functions
+# -----------------------------
+def build_cnn(input_shape, num_classes):
+    model = models.Sequential([
+        layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
+        layers.MaxPooling2D((2, 2)),
+        
+        layers.Conv2D(64, (3, 3), activation='relu'),
+        layers.MaxPooling2D((2, 2)),
+        
+        layers.Conv2D(128, (3, 3), activation='relu'),
+        layers.MaxPooling2D((2, 2)),
+        
+        layers.Flatten(),
+        layers.Dense(128, activation='relu'),
+        layers.Dropout(0.5),
+        layers.Dense(num_classes, activation='softmax')
+    ])
+    return model
 
+def build_resnet(input_shape, num_classes):
+    base = ResNet50(weights="imagenet", include_top=False,
+                    input_shape=(input_shape[0], input_shape[1], 3),
+                    pooling="avg")
+    base.trainable = False
+    model = models.Sequential([
+        base,
+        layers.Dense(128, activation="relu"),
+        layers.Dropout(0.5),
+        layers.Dense(num_classes, activation="softmax")
+    ])
+    return model
+
+def build_efficientnet(input_shape, num_classes):
+    # 1. Define an explicit input layer. This is the start of the Functional API.
+    inputs = layers.Input(shape=input_shape) 
+
+    # 2. Initialize the base model, passing the `inputs` tensor to it.
+    base = EfficientNetB0(
+        weights="imagenet", 
+        include_top=False,
+        input_tensor=inputs, # Use input_tensor
+        pooling="avg"
+    )
+    base.trainable = False
+
+    # 3. Chain the layers together. Start from the output of the base model.
+    x = base.output 
+    x = layers.Dense(128, activation="relu")(x) # Pass the previous layer's output to the next
+    x = layers.Dropout(0.5)(x)
+    outputs = layers.Dense(num_classes, activation="softmax")(x) # This is the final output
+
+    # 4. Create the final model by specifying its inputs and outputs.
+    model = models.Model(inputs=inputs, outputs=outputs)
+    
+    return model
+
+# def build_efficientnet(input_shape, num_classes):
+#     base = EfficientNetB0(weights="imagenet", include_top=False,
+#                           input_shape=(input_shape[0], input_shape[1], 3),
+#                           pooling="avg")
+#     base.trainable = False
+#     model = models.Sequential([
+#         base,
+#         layers.Dense(128, activation="relu"),
+#         layers.Dropout(0.5),
+#         layers.Dense(num_classes, activation="softmax")
+#     ])
+#     return model
+
+def build_mobilenet(input_shape, num_classes):
+    base = MobileNetV2(weights="imagenet", include_top=False,
+                       input_shape=(input_shape[0], input_shape[1], 3),
+                       pooling="avg")
+    base.trainable = False
+    model = models.Sequential([
+        base,
+        layers.Dense(128, activation="relu"),
+        layers.Dropout(0.5),
+        layers.Dense(num_classes, activation="softmax")
+    ])
+    return model
+
+# -----------------------------
+# 3. Train & Evaluate
+# -----------------------------
+def plot_history(history, name):
+    """Plot accuracy and loss curves for a model."""
+    plt.figure(figsize=(12,5))
+
+    # Accuracy
+    plt.subplot(1,2,1)
+    plt.plot(history.history['accuracy'], label="Train")
+    plt.plot(history.history['val_accuracy'], label="Val")
+    plt.title(f"{name} Accuracy")
+    plt.xlabel("Epochs")
+    plt.ylabel("Accuracy")
+    plt.legend()
+
+    # Loss
+    plt.subplot(1,2,2)
+    plt.plot(history.history['loss'], label="Train")
+    plt.plot(history.history['val_loss'], label="Val")
+    plt.title(f"{name} Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(f"{name}_training_curves.png")
+    plt.close()
+
+def train_and_evaluate(model, name):
+    print(f"\n🚀 Training {name}...")
+    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
+    
+    history = model.fit(
+        X_train, y_train_cat,
+        validation_data=(X_test, y_test_cat),
+        epochs=EPOCHS,
+        batch_size=BATCH_SIZE,
+        verbose=1
+    )
+    
+    loss, acc = model.evaluate(X_test, y_test_cat, verbose=0)
+    y_pred = np.argmax(model.predict(X_test), axis=1)
+    
     metrics = {
         "accuracy": accuracy_score(y_test, y_pred),
         "precision": precision_score(y_test, y_pred, average='weighted', zero_division=0),
         "recall": recall_score(y_test, y_pred, average='weighted', zero_division=0),
         "f1": f1_score(y_test, y_pred, average='weighted', zero_division=0)
     }
+    print(f"✅ {name} done. Accuracy: {metrics['accuracy']:.4f}")
+    
+    model.save(f"{name}_model.keras")
+    plot_history(history, name)  # save training progress
+    return metrics, history.history
 
-    pickle.dump(model, open(save_path, "wb"))
-    return metrics, confidences
-
-# -----------------------------
-# Train Traditional Models
-# -----------------------------
 results = {}
-confidences_dict = {}
 
-# Decision Tree
-metrics_dt, conf_dt = evaluate_model(
-    "Decision Tree",
-    DecisionTreeClassifier(random_state=42),
-    X_train, y_train, X_test, y_test,
-    "finalized_model_DT.sav"
-)
-results["Decision Tree"] = metrics_dt
-confidences_dict["Decision Tree"] = conf_dt
+# CNN
+cnn_model = build_cnn((IMG_SIZE[0], IMG_SIZE[1], 3), len(classes))
+results["CNN"], _ = train_and_evaluate(cnn_model, "CNN")
 
-# -----------------------------
-# CNN Model
-# -----------------------------
-cnn_model = models.Sequential([
-    layers.Conv2D(32, (3, 3), activation='relu', input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3)),
-    layers.MaxPooling2D((2, 2)),
-    
-    layers.Conv2D(64, (3, 3), activation='relu'),
-    layers.MaxPooling2D((2, 2)),
-    
-    layers.Flatten(),
-    layers.Dense(64, activation='relu'),
-    layers.Dense(len(classes), activation='softmax')  # 3 classes
-])
+# ResNet
+resnet_model = build_resnet((IMG_SIZE[0], IMG_SIZE[1], 3), len(classes))
+results["ResNet"], _ = train_and_evaluate(resnet_model, "ResNet")
 
-cnn_model.compile(optimizer='adam',
-                  loss='sparse_categorical_crossentropy',
-                  metrics=['accuracy'])
+# # EfficientNet
+# eff_model = build_efficientnet((IMG_SIZE[0], IMG_SIZE[1], 3), len(classes))
+# results["EfficientNet"], _ = train_and_evaluate(eff_model, "EfficientNet")
 
-# CNN requires image data, but here you only extracted features (GLCM).
-# If you want CNN, you should reload dataset as RGB images instead of features.
-# Placeholder training on extracted features (will error if X not images).
-# cnn_model.fit(X_train, y_train, epochs=10, batch_size=32, validation_data=(X_test, y_test))
-# cnn_model.save("finalized_model_CNN.keras")
-
-# Random Forest
-metrics_rf, conf_rf = evaluate_model(
-    "Random Forest",
-    RandomForestClassifier(n_estimators=100, random_state=42),
-    X_train, y_train, X_test, y_test,
-    "finalized_model_RF.sav"
-)
-results["Random Forest"] = metrics_rf
-confidences_dict["Random Forest"] = conf_rf
-
-# Support Vector Machine
-metrics_svm, conf_svm = evaluate_model(
-    "Support Vector Machine",
-    SVC(kernel='linear', probability=True, random_state=42),
-    X_train, y_train, X_test, y_test,
-    "finalized_model_SVM.sav"
-)
-results["Support Vector Machine"] = metrics_svm
-confidences_dict["Support Vector Machine"] = conf_svm
+# MobileNet
+mobile_model = build_mobilenet((IMG_SIZE[0], IMG_SIZE[1], 3), len(classes))
+results["MobileNet"], _ = train_and_evaluate(mobile_model, "MobileNet")
 
 # -----------------------------
-# 4. MLP (Tabular-based)
-# -----------------------------
-y_train_cnn = to_categorical(y_train, num_classes=len(classes))
-y_test_cnn = to_categorical(y_test, num_classes=len(classes))
-
-mlp_model = Sequential()
-mlp_model.add(Dense(64, input_dim=X_train.shape[1], activation="relu"))
-mlp_model.add(Dense(32, activation="relu"))
-mlp_model.add(Dense(len(classes), activation="softmax"))  # 3 classes
-
-mlp_model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=["accuracy"])
-mlp_model.fit(X_train, y_train_cnn, epochs=50, batch_size=8, verbose=0)
-
-loss, acc = mlp_model.evaluate(X_test, y_test_cnn, verbose=0)
-y_pred_mlp = np.argmax(mlp_model.predict(X_test), axis=1)
-conf_mlp = mlp_model.predict(X_test)
-
-results["MLP"] = {
-    "accuracy": acc,
-    "precision": precision_score(y_test, y_pred_mlp, average='weighted', zero_division=0),
-    "recall": recall_score(y_test, y_pred_mlp, average='weighted', zero_division=0),
-    "f1": f1_score(y_test, y_pred_mlp, average='weighted', zero_division=0)
-}
-confidences_dict["MLP"] = conf_mlp
-
-mlp_model.save("finalized_model_MLP.keras")
-
-# -----------------------------
-# Save results for Streamlit
+# 4. Save Results
 # -----------------------------
 np.save("model_results.npy", results)
-np.save("model_confidences.npy", confidences_dict)
 np.save("class_names.npy", classes)
 
-print("✅ Training complete. Metrics and confidences saved.")
+print("\n✅ Training complete. Metrics saved. Training curves saved as PNGs.")
