@@ -7,7 +7,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 import tensorflow as tf
 from tensorflow.keras import layers, models
-from tensorflow.keras.applications import ResNet50, EfficientNetB0, MobileNetV2
+from tensorflow.keras.applications import ResNet50, InceptionV3, MobileNetV2
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.utils import to_categorical
 from tqdm import tqdm
@@ -83,42 +83,17 @@ def build_resnet(input_shape, num_classes):
     ])
     return model
 
-def build_efficientnet(input_shape, num_classes):
-    # 1. Define an explicit input layer. This is the start of the Functional API.
-    inputs = layers.Input(shape=input_shape) 
-
-    # 2. Initialize the base model, passing the `inputs` tensor to it.
-    base = EfficientNetB0(
-        weights="imagenet", 
-        include_top=False,
-        input_tensor=inputs, # Use input_tensor
-        pooling="avg"
-    )
+def build_inceptionnet(input_shape, num_classes):
+    inputs = layers.Input(shape=input_shape)
+    base = InceptionV3(weights="imagenet", include_top=False,
+                       input_tensor=inputs, pooling="avg")
     base.trainable = False
-
-    # 3. Chain the layers together. Start from the output of the base model.
-    x = base.output 
-    x = layers.Dense(128, activation="relu")(x) # Pass the previous layer's output to the next
+    x = base.output
+    x = layers.Dense(128, activation="relu")(x)
     x = layers.Dropout(0.5)(x)
-    outputs = layers.Dense(num_classes, activation="softmax")(x) # This is the final output
-
-    # 4. Create the final model by specifying its inputs and outputs.
+    outputs = layers.Dense(num_classes, activation="softmax")(x)
     model = models.Model(inputs=inputs, outputs=outputs)
-    
     return model
-
-# def build_efficientnet(input_shape, num_classes):
-#     base = EfficientNetB0(weights="imagenet", include_top=False,
-#                           input_shape=(input_shape[0], input_shape[1], 3),
-#                           pooling="avg")
-#     base.trainable = False
-#     model = models.Sequential([
-#         base,
-#         layers.Dense(128, activation="relu"),
-#         layers.Dropout(0.5),
-#         layers.Dense(num_classes, activation="softmax")
-#     ])
-#     return model
 
 def build_mobilenet(input_shape, num_classes):
     base = MobileNetV2(weights="imagenet", include_top=False,
@@ -199,9 +174,9 @@ results["CNN"], _ = train_and_evaluate(cnn_model, "CNN")
 resnet_model = build_resnet((IMG_SIZE[0], IMG_SIZE[1], 3), len(classes))
 results["ResNet"], _ = train_and_evaluate(resnet_model, "ResNet")
 
-# # EfficientNet
-# eff_model = build_efficientnet((IMG_SIZE[0], IMG_SIZE[1], 3), len(classes))
-# results["EfficientNet"], _ = train_and_evaluate(eff_model, "EfficientNet")
+# InceptionNet
+inception_model = build_inceptionnet((IMG_SIZE[0], IMG_SIZE[1], 3), len(classes))
+results["InceptionNet"], _ = train_and_evaluate(inception_model, "InceptionNet")
 
 # MobileNet
 mobile_model = build_mobilenet((IMG_SIZE[0], IMG_SIZE[1], 3), len(classes))
