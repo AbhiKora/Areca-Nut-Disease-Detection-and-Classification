@@ -52,7 +52,7 @@ print("\n🎨 Generating advanced visualizations for all trained models...")
 model_names = ["CNN", "ResNet", "InceptionNet", "MobileNet"] 
 
 for model_name in model_names:
-    model_path = f"{model_name}_model.keras"
+    model_path = f"models/{model_name}_model.keras"
     
     if not os.path.exists(model_path):
         print(f"⚠️ Warning: Model file not found at {model_path}. Skipping.")

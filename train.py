@@ -159,8 +159,10 @@ def train_and_evaluate(model, name):
         "f1": f1_score(y_test, y_pred, average='weighted', zero_division=0)
     }
     print(f"✅ {name} done. Accuracy: {metrics['accuracy']:.4f}")
+
+    os.makedirs("models", exist_ok=True)
     
-    model.save(f"{name}_model.keras")
+    model.save(f"models/{name}_model.keras")
     plot_history(history, name)  # save training progress
     return metrics, history.history
 

@@ -39,21 +39,21 @@ Trained models available here: [Google Drive Link to Models](https://drive.googl
   <tr>
     <td align="center">
       <h3>CNN</h3>
-      <img src="CNN_confusion_matrix.png" alt="CNN confusion matrix" width="100%"/>
+      <img src="images/confusion_matrices/CNN_confusion_matrix.png" alt="CNN confusion matrix" width="100%"/>
     </td>
     <td align="center">
       <h3>ResNet50</h3>
-      <img src="ResNet_confusion_matrix.png" alt="ResNet50 confusion matrix" width="100%"/>
+      <img src="images/confusion_matrices/ResNet_confusion_matrix.png" alt="ResNet50 confusion matrix" width="100%"/>
     </td>
   </tr>
   <tr>
     <td align="center">
       <h3>InceptionV3</h3>
-      <img src="InceptionNet_confusion_matrix.png" alt="InceptionV3 confusion matrix" width="100%"/>
+      <img src="images/confusion_matrices/InceptionNet_confusion_matrix.png" alt="InceptionV3 confusion matrix" width="100%"/>
     </td>
     <td align="center">
       <h3>MobileNetV2</h3>
-      <img src="MobileNet_confusion_matrix.png" alt="MobileNetV2 confusion matrix" width="100%"/>
+      <img src="images/confusion_matrices/MobileNet_confusion_matrix.png" alt="MobileNetV2 confusion matrix" width="100%"/>
     </td>
   </tr>
 </table>
@@ -63,21 +63,21 @@ Trained models available here: [Google Drive Link to Models](https://drive.googl
   <tr>
     <td align="center">
       <h3>CNN</h3>
-      <img src="CNN_tsne_plot.png" alt="CNN tsne Plot" width="100%"/>
+      <img src="images/tsne_plots/CNN_tsne_plot.png" alt="CNN tsne Plot" width="100%"/>
     </td>
     <td align="center">
       <h3>ResNet50</h3>
-      <img src="ResNet_tsne_plot.png" alt="ResNet50 tsne Plot" width="100%"/>
+      <img src="images/tsne_plots/ResNet_tsne_plot.png" alt="ResNet50 tsne Plot" width="100%"/>
     </td>
   </tr>
   <tr>
     <td align="center">
       <h3>InceptionV3</h3>
-      <img src="InceptionNet_tsne_plot.png" alt="InceptionV3 tsne Plot" width="100%"/>
+      <img src="images/tsne_plots/InceptionNet_tsne_plot.png" alt="InceptionV3 tsne Plot" width="100%"/>
     </td>
     <td align="center">
       <h3>MobileNetV2</h3>
-      <img src="MobileNet_tsne_plot.png" alt="MobileNetV2 tsne Plot" width="100%"/>
+      <img src="images/tsne_plots/MobileNet_tsne_plot.png" alt="MobileNetV2 tsne Plot" width="100%"/>
     </td>
   </tr>
 </table>
@@ -96,10 +96,11 @@ Trained models available here: [Google Drive Link to Models](https://drive.googl
    ```
 
 4. **Download trained models**
-   Place `.keras` model files in the repo’s root directory from the provided Drive link.
+   Place `.keras` model files in the models directory from the provided Drive link.
 
 5. **Run the Streamlit UI**
    ```bash
+   cd gui
    streamlit run Home.py
    ```
 
