@@ -22,7 +22,7 @@ def load_results(filepath):
         return np.load(filepath, allow_pickle=True).item()
     return None
 
-results = load_results('model_results.npy')
+results = load_results('../model_results.npy')
 
 # --- Main Application ---
 if results is None:
@@ -52,7 +52,7 @@ else:
     
     with col1:
         st.markdown("#### Confusion Matrix")
-        cm_path = f'{selected_model}_confusion_matrix.png'
+        cm_path = f'../images/confusion_matrices/{selected_model}_confusion_matrix.png'
         if os.path.exists(cm_path):
             st.image(cm_path, caption=f'Confusion Matrix for {selected_model}', use_container_width=True)
         else:
@@ -60,7 +60,7 @@ else:
 
     with col2:
         st.markdown("#### t-SNE Plot of Image Features")
-        tsne_path = f'{selected_model}_tsne_plot.png'
+        tsne_path = f'../images/confusion_matrices/{selected_model}_tsne_plot.png'
         if os.path.exists(tsne_path):
             st.image(tsne_path, caption=f't-SNE Visualization for {selected_model}', use_container_width=True)
         else:
