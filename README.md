@@ -92,7 +92,8 @@ Trained models available here: [Google Drive Link to Models](https://drive.googl
 
 2. **Conda environment**
    ```bash
-   conda env create -f environment.yml
+   conda env create -f areca_environment.yml
+   conda activate areca
    ```
 
 4. **Download trained models**
